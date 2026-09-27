@@ -1,47 +1,76 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import * as bcrypt from 'bcrypt';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { Role } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
+import { env } from '../config/env';
+import { PrismaService } from '../prisma/prisma.service';
+
+const publicUserSelect = {
+  id: true,
+  email: true,
+  role: true,
+  isActive: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
 
 @Injectable()
 export class AuthService {
-  constructor(private prisma: PrismaService, private jwtService: JwtService) {}
-
-  async validateUser(email: string, password: string) {
-    const user = await this.prisma.user.findUnique({ where: { email } });
-    if (user && (await bcrypt.compare(password, user.password))) {
-      const { password, ...result } = user;
-      return result;
-    }
-    return null;
-  }
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly jwtService: JwtService,
+  ) {}
 
   async login(email: string, password: string) {
-    const user = await this.validateUser(email, password);
-    if (!user) {
-      return { error: 'Invalid credentials' };
+    const user = await this.prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+    if (!user || !user.isActive || !(await bcrypt.compare(password, user.password))) {
+      throw new UnauthorizedException('Invalid email or password');
     }
-    const token = this.jwtService.sign({ userId: user.id, email: user.email, role: user.role });
-    return { token, user };
+
+    const safeUser = await this.prisma.user.findUniqueOrThrow({
+      where: { id: user.id },
+      select: publicUserSelect,
+    });
+    return { user: safeUser, token: this.sign(user.id, user.email, user.role) };
   }
 
-  async signup(email: string, password: string, role: string = 'user') {
-    const existingUser = await this.prisma.user.findUnique({ where: { email } });
-    if (existingUser) {
-      throw new BadRequestException('email deja utulisé');
+  async signup(email: string, password: string) {
+    if (!env.allowPublicSignup) {
+      throw new ForbiddenException('Public signup is disabled. Ask an administrator to create your account.');
     }
-    const hashedPassword = await bcrypt.hash(password, 10);
 
-    const newUser = await this.prisma.user.create({
+    const normalizedEmail = email.toLowerCase();
+    const existing = await this.prisma.user.findUnique({ where: { email: normalizedEmail } });
+    if (existing) throw new BadRequestException('An account with this email already exists');
+
+    const user = await this.prisma.user.create({
       data: {
-        email,
-        password: hashedPassword,
-        role:'employee',
+        email: normalizedEmail,
+        password: await bcrypt.hash(password, 12),
+        role: Role.EMPLOYEE,
       },
+      select: publicUserSelect,
     });
 
-    const token = this.jwtService.sign({ userId: newUser.id, email: newUser.email, role: newUser.role });
+    return { user, token: this.sign(user.id, user.email, user.role) };
+  }
 
-    return { message: 'Signup successful', token, user: { id: newUser.id, email: newUser.email, role: newUser.role } };
+  async getCurrentUser(userId: string) {
+    return this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: publicUserSelect,
+    });
+  }
+
+  private sign(userId: string, email: string, role: Role) {
+    return this.jwtService.sign(
+      { sub: userId, email, role },
+      { expiresIn: env.jwtExpiresInSeconds },
+    );
   }
 }

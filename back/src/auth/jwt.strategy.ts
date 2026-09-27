@@ -1,21 +1,46 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
+import { Role } from '@prisma/client';
 import { ExtractJwt, Strategy } from 'passport-jwt';
-import * as dotenv from 'dotenv';
+import { Request } from 'express';
+import { AuthenticatedUser } from '../common/authenticated-user';
+import { env } from '../config/env';
+import { PrismaService } from '../prisma/prisma.service';
 
-dotenv.config();
+const cookieExtractor = (request: Request): string | null => {
+  const header = request.headers.cookie;
+  if (!header) return null;
+  const cookies = header.split(';').map((part) => part.trim());
+  const prefix = `${env.accessCookieName}=`;
+  const cookie = cookies.find((item) => item.startsWith(prefix));
+  return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : null;
+};
+
+interface JwtPayload {
+  sub: string;
+  email: string;
+  role: Role;
+}
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor() {
+  constructor(private readonly prisma: PrismaService) {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+        cookieExtractor,
+      ]),
       ignoreExpiration: false,
-      secretOrKey: process.env.JWT_SECRET,
+      secretOrKey: env.jwtSecret,
     });
   }
 
-  async validate(payload: any) {
-    return { userId: payload.userId, email: payload.email };
+  async validate(payload: JwtPayload): Promise<AuthenticatedUser> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: { id: true, email: true, role: true, isActive: true },
+    });
+    if (!user?.isActive) throw new UnauthorizedException('Account is inactive');
+    return { userId: user.id, email: user.email, role: user.role };
   }
 }

@@ -8,9 +8,104 @@ generator client {
   provider = "prisma-client-js"
 }
 
+enum Role {
+  ADMIN
+  EMPLOYEE
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum ActivityType {
+  CREATED
+  UPDATED
+  ASSIGNED
+  STATUS_CHANGED
+  COMMENTED
+  DELETED
+}
+
 model User {
-  id       String @id @default(uuid())
-  email    String @unique
-  password String
-  role String
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  role      Role     @default(EMPLOYEE)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assignedTasks Task[]         @relation("AssignedTasks")
+  createdTasks  Task[]         @relation("CreatedTasks")
+  comments      Comment[]
+  activities    TaskActivity[]
+
+  @@index([role, isActive])
+}
+
+model Task {
+  id          String       @id @default(uuid())
+  title       String
+  description String?
+  deadline    DateTime?
+  priority    TaskPriority @default(MEDIUM)
+  status      TaskStatus   @default(PENDING)
+  completedAt DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  assignedToId String?
+  assignedTo   User? @relation("AssignedTasks", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  createdById String
+  createdBy   User @relation("CreatedTasks", fields: [createdById], references: [id], onDelete: Restrict)
+
+  comments   Comment[]
+  activities TaskActivity[]
+
+  @@index([status])
+  @@index([priority])
+  @@index([deadline])
+  @@index([assignedToId, status])
+  @@index([createdById])
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  text      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  taskId String
+  task   Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  authorId String
+  author   User @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([taskId, createdAt])
+  @@index([authorId])
+}
+
+model TaskActivity {
+  id        String       @id @default(uuid())
+  type      ActivityType
+  metadata  Json?
+  createdAt DateTime     @default(now())
+
+  taskId String
+  task   Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  actorId String?
+  actor   User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([taskId, createdAt])
+  @@index([actorId])
 }

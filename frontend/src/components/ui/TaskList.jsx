@@ -1,210 +1,193 @@
 import { useState } from 'react';
 import { format } from 'date-fns';
 
-const TaskList = ({ tasks, onEdit, onDelete, onAssign, isAdmin, users }) => {
-  const [expandedTask, setExpandedTask] = useState(null);
-  const [comment, setComment] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [priorityFilter, setPriorityFilter] = useState('all');
-  
-  const getPriorityColor = (priority) => {
-    switch (priority.toLowerCase()) {
-      case 'high': return 'bg-red-100 text-red-800';
-      case 'medium': return 'bg-yellow-100 text-yellow-800';
-      case 'low': return 'bg-green-100 text-green-800';
-      default: return 'bg-gray-100 text-gray-800';
+const statusLabel = {
+  PENDING: 'Pending',
+  IN_PROGRESS: 'In progress',
+  COMPLETED: 'Completed',
+};
+
+const priorityClass = {
+  HIGH: 'bg-red-50 text-red-700 ring-red-200',
+  MEDIUM: 'bg-amber-50 text-amber-700 ring-amber-200',
+  LOW: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+};
+
+const statusClass = {
+  PENDING: 'bg-slate-100 text-slate-700 ring-slate-200',
+  IN_PROGRESS: 'bg-blue-50 text-blue-700 ring-blue-200',
+  COMPLETED: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+};
+
+const TaskList = ({
+  tasks,
+  users,
+  isAdmin,
+  onEdit,
+  onDelete,
+  onAssign,
+  onStatusChange,
+  onAddComment,
+  onLoadDetails,
+}) => {
+  const [expandedId, setExpandedId] = useState(null);
+  const [comments, setComments] = useState({});
+  const [loadingDetails, setLoadingDetails] = useState(null);
+
+  const expand = async (task) => {
+    if (expandedId === task.id) {
+      setExpandedId(null);
+      return;
+    }
+    setExpandedId(task.id);
+    if (!task.comments) {
+      setLoadingDetails(task.id);
+      try {
+        await onLoadDetails(task.id);
+      } finally {
+        setLoadingDetails(null);
+      }
     }
   };
-  
-  const getStatusColor = (status) => {
-    switch (status.toLowerCase()) {
-      case 'completed': return 'bg-green-100 text-green-800';
-      case 'in_progress': return 'bg-blue-100 text-blue-800';
-      case 'pending': return 'bg-yellow-100 text-yellow-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
+
+  const sendComment = async (taskId) => {
+    const text = comments[taskId]?.trim();
+    if (!text) return;
+    await onAddComment(taskId, text);
+    setComments((current) => ({ ...current, [taskId]: '' }));
   };
-  
-  const filteredTasks = tasks.filter(task => {
-    return (statusFilter === 'all' || task.status.toLowerCase() === statusFilter) &&
-           (priorityFilter === 'all' || task.priority.toLowerCase() === priorityFilter);
-  });
-  
-  const handleExpandTask = (id) => {
-    setExpandedTask(expandedTask === id ? null : id);
-  };
-  
-  const handleAssignTask = (taskId, e) => {
-    onAssign(taskId, e.target.value);
-  };
-  
-  const handleAddComment = (taskId) => {
-    if (!comment.trim()) return;
-    
-    // This would need to be implemented with your API
-    console.log("Adding comment to task", taskId, comment);
-    setComment('');
-  };
-  
-  return (
-    <div className="bg-white shadow rounded-lg overflow-hidden">
-      <div className="p-4 border-b">
-        <h3 className="text-lg font-semibold">
-          {isAdmin ? 'All Tasks' : 'My Tasks'} ({filteredTasks.length})
-        </h3>
-        
-        <div className="mt-3 flex flex-wrap gap-2">
-          <select 
-            className="border rounded p-1 text-sm"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-          >
-            <option value="all">All Status</option>
-            <option value="pending">Pending</option>
-            <option value="in_progress">In Progress</option>
-            <option value="completed">Completed</option>
-          </select>
-          
-          <select 
-            className="border rounded p-1 text-sm"
-            value={priorityFilter}
-            onChange={(e) => setPriorityFilter(e.target.value)}
-          >
-            <option value="all">All Priorities</option>
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-          </select>
-        </div>
+
+  if (!tasks.length) {
+    return (
+      <div className="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center">
+        <h3 className="font-semibold text-slate-900">No tasks match these filters</h3>
+        <p className="mt-1 text-sm text-slate-500">Change the filters or create a new task.</p>
       </div>
-      
-      {filteredTasks.length === 0 ? (
-        <div className="p-6 text-center text-gray-500">
-          No tasks found matching the current filters.
-        </div>
-      ) : (
-        <ul className="divide-y divide-gray-200">
-          {filteredTasks.map(task => (
-            <li key={task.id} className="p-4 hover:bg-gray-50">
-              <div className="flex justify-between items-start">
-                <div className="flex-1">
-                  <div className="flex gap-2 mb-1">
-                    <span className={`px-2 py-0.5 rounded text-xs ${getPriorityColor(task.priority)}`}>
-                      {task.priority}
-                    </span>
-                    <span className={`px-2 py-0.5 rounded text-xs ${getStatusColor(task.status)}`}>
-                      {task.status}
-                    </span>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {tasks.map((task) => {
+        const overdue = task.deadline && task.status !== 'COMPLETED' && new Date(task.deadline) < new Date();
+        const expanded = expandedId === task.id;
+        return (
+          <article key={task.id} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="p-4 sm:p-5">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => expand(task)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      expand(task);
+                    }
+                  }}
+                  className="min-w-0 flex-1 cursor-pointer rounded-lg text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                  aria-expanded={expanded}
+                >
+                  <div className="mb-2 flex flex-wrap gap-2">
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${priorityClass[task.priority]}`}>{task.priority}</span>
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${statusClass[task.status]}`}>{statusLabel[task.status]}</span>
+                    {overdue && <span className="rounded-full bg-red-600 px-2.5 py-1 text-xs font-semibold text-white">Overdue</span>}
                   </div>
-                  
-                  <h4 className="font-semibold text-lg cursor-pointer" onClick={() => handleExpandTask(task.id)}>
-                    {task.title}
-                  </h4>
-                  
-                  <div className="text-sm text-gray-500 mt-1 flex gap-3">
-                    <span>
-                      Deadline: {task.deadline ? format(new Date(task.deadline), 'MMM d, yyyy') : 'None'}
-                    </span>
-                    {task.assignedTo && (
-                      <span>
-                        Assigned to: {users.find(u => u.id === task.assignedTo)?.email || 'Unknown'}
-                      </span>
-                    )}
+                  <h3 className="truncate text-lg font-semibold text-slate-950">{task.title}</h3>
+                  <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-slate-500">
+                    <span>Due: {task.deadline ? format(new Date(task.deadline), 'MMM d, yyyy') : 'No deadline'}</span>
+                    <span>Assignee: {task.assignedTo?.email || 'Unassigned'}</span>
+                    <span>{task._count?.comments ?? task.comments?.length ?? 0} comments</span>
                   </div>
                 </div>
-                
-                <div className="flex gap-2">
-                  <button 
-                    onClick={() => onEdit(task)} 
-                    className="text-blue-500 hover:text-blue-700"
-                    title="Edit task"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                      <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
-                    </svg>
-                  </button>
-                  
-                  {isAdmin && (
-                    <button 
-                      onClick={() => onDelete(task.id)} 
-                      className="text-red-500 hover:text-red-700"
-                      title="Delete task"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-                      </svg>
-                    </button>
+
+                <div className="flex items-center gap-2">
+                  {isAdmin ? (
+                    <>
+                      <button onClick={() => onEdit(task)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Edit</button>
+                      <button onClick={() => onDelete(task)} className="rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50">Delete</button>
+                    </>
+                  ) : (
+                    <select value={task.status} onChange={(event) => onStatusChange(task.id, event.target.value)}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
+                      <option value="PENDING">Pending</option>
+                      <option value="IN_PROGRESS">In progress</option>
+                      <option value="COMPLETED">Completed</option>
+                    </select>
                   )}
                 </div>
               </div>
-              
-              {expandedTask === task.id && (
-                <div className="mt-3 border-t pt-3">
-                  <p className="text-gray-700 mb-3">{task.description}</p>
-                  
-                  {isAdmin && (
-                    <div className="mb-3">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Assign to:
-                      </label>
-                      <select 
-                        className="border rounded w-full p-2"
-                        value={task.assignedTo || ''}
-                        onChange={(e) => handleAssignTask(task.id, e)}
-                      >
-                        <option value="">Not assigned</option>
-                        {users.filter(u => u.role === 'employee').map(user => (
-                          <option key={user.id} value={user.id}>
-                            {user.email}
-                          </option>
-                        ))}
-                      </select>
+            </div>
+
+            {expanded && (
+              <div className="border-t border-slate-200 bg-slate-50 p-4 sm:p-5">
+                {loadingDetails === task.id ? (
+                  <p className="text-sm text-slate-500">Loading task details…</p>
+                ) : (
+                  <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+                    <div>
+                      <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Description</h4>
+                      <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{task.description || 'No description provided.'}</p>
+
+                      <h4 className="mt-6 text-sm font-semibold uppercase tracking-wide text-slate-500">Comments</h4>
+                      <div className="mt-2 space-y-2">
+                        {task.comments?.length ? task.comments.map((comment) => (
+                          <div key={comment.id} className="rounded-lg border border-slate-200 bg-white p-3">
+                            <div className="flex justify-between gap-3 text-xs text-slate-500">
+                              <span className="font-semibold text-slate-700">{comment.author.email}</span>
+                              <span>{format(new Date(comment.createdAt), 'MMM d, HH:mm')}</span>
+                            </div>
+                            <p className="mt-1 text-sm text-slate-700">{comment.text}</p>
+                          </div>
+                        )) : <p className="text-sm text-slate-500">No comments yet.</p>}
+                      </div>
+                      <div className="mt-3 flex gap-2">
+                        <input value={comments[task.id] || ''} maxLength={2000}
+                          onChange={(event) => setComments((current) => ({ ...current, [task.id]: event.target.value }))}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' && !event.shiftKey) {
+                              event.preventDefault();
+                              sendComment(task.id);
+                            }
+                          }}
+                          placeholder="Add a comment…"
+                          className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500" />
+                        <button onClick={() => sendComment(task.id)} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">Send</button>
+                      </div>
                     </div>
-                  )}
-                  
-                  <div className="mt-3">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Add comment:
-                    </label>
-                    <div className="flex">
-                      <input
-                        type="text"
-                        className="flex-1 border rounded-l p-2"
-                        value={comment}
-                        onChange={(e) => setComment(e.target.value)}
-                        placeholder="Write a comment..."
-                      />
-                      <button
-                        onClick={() => handleAddComment(task.id)}
-                        className="bg-blue-500 text-white rounded-r px-3"
-                      >
-                        Send
-                      </button>
+
+                    <div className="space-y-4">
+                      {isAdmin && (
+                        <label className="block text-sm font-medium text-slate-700">
+                          Assignment
+                          <select value={task.assignedToId || ''} onChange={(event) => onAssign(task.id, event.target.value || null)}
+                            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
+                            <option value="">Unassigned</option>
+                            {users.filter((user) => user.role === 'EMPLOYEE' && user.isActive).map((user) => (
+                              <option key={user.id} value={user.id}>{user.email}</option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
+                      <div>
+                        <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Recent activity</h4>
+                        <div className="mt-2 space-y-2">
+                          {task.activities?.length ? task.activities.slice(0, 8).map((activity) => (
+                            <div key={activity.id} className="text-xs text-slate-600">
+                              <span className="font-semibold">{activity.actor?.email || 'System'}</span>{' '}
+                              {activity.type.toLowerCase().replaceAll('_', ' ')} · {format(new Date(activity.createdAt), 'MMM d, HH:mm')}
+                            </div>
+                          )) : <p className="text-sm text-slate-500">No activity available.</p>}
+                        </div>
+                      </div>
                     </div>
                   </div>
-                  
-                  {task.comments && task.comments.length > 0 && (
-                    <div className="mt-3">
-                      <h5 className="font-medium text-sm">Comments:</h5>
-                      <ul className="mt-1 space-y-2">
-                        {task.comments.map((comment, index) => (
-                          <li key={index} className="text-sm bg-gray-50 p-2 rounded">
-                            <div className="font-medium">{comment.user}</div>
-                            <div>{comment.text}</div>
-                            <div className="text-xs text-gray-500">
-                              {format(new Date(comment.timestamp), 'MMM d, yyyy HH:mm')}
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
+                )}
+              </div>
+            )}
+          </article>
+        );
+      })}
     </div>
   );
 };
